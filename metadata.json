@@ -1,0 +1,5 @@
+{
+  "name": "坦克对战 (Tank Battle)",
+  "description": "一个基于 Canvas 的高性能坦克对战游戏，具有关卡升级、多种坦克类型和华丽的视觉效果。",
+  "requestFramePermissions": []
+}
