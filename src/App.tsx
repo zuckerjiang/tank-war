@@ -38,6 +38,128 @@ import {
 
 // --- Game Logic Classes ---
 
+class AudioManager {
+  private ctx: AudioContext | null = null;
+  private masterGain: GainNode | null = null;
+  private musicGain: GainNode | null = null;
+  private isMuted: boolean = false;
+  private musicInterval: any = null;
+
+  constructor() {
+    try {
+      this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.connect(this.ctx.destination);
+      this.masterGain.gain.value = 0.2;
+
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.connect(this.masterGain);
+      this.musicGain.gain.value = 0.1;
+    } catch (e) {
+      console.warn('AudioContext not supported');
+    }
+  }
+
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  playExplosion() {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+    
+    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+    
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.4);
+  }
+
+  playShoot() {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.1);
+    
+    gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+    
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.1);
+  }
+
+  playPowerUp() {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.2);
+    
+    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+    
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.2);
+  }
+
+  startMusic() {
+    if (!this.ctx || !this.musicGain || this.musicInterval) return;
+    
+    let step = 0;
+    const notes = [110, 110, 164, 110, 110, 110, 146, 110]; // Simple bass loop
+    
+    this.musicInterval = setInterval(() => {
+      if (this.ctx && this.musicGain) {
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(notes[step % notes.length], this.ctx.currentTime);
+        
+        g.gain.setValueAtTime(0.1, this.ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+        
+        osc.connect(g);
+        g.connect(this.musicGain);
+        
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.2);
+        step++;
+      }
+    }, 200);
+  }
+
+  stopMusic() {
+    if (this.musicInterval) {
+      clearInterval(this.musicInterval);
+      this.musicInterval = null;
+    }
+  }
+}
+
+const audioManager = new AudioManager();
+
 class Bullet {
   x: number;
   y: number;
@@ -308,6 +430,7 @@ class Tank {
   cooldown: number = 0;
   invulnerable: number = 0;
   stunned: number = 0;
+  mudImmunity: number = 0;
   hasShield: boolean = false;
   tripleShotTimer: number = 0;
   rapidFireTimer: number = 0;
@@ -600,6 +723,18 @@ export default function App() {
   const requestRef = useRef<number>(0);
   const gameStateRef = useRef<GameState>(gameState);
   const freezeTimerRef = useRef<number>(0);
+  const joystickRef = useRef({ x: 0, y: 0 });
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Sync ref with state
   useEffect(() => {
@@ -616,6 +751,7 @@ export default function App() {
     const text = isNuke ? 'NUCLEAR!' : 'BOOM!';
     
     createExplosion(barrel.x, barrel.y, color, isNuke ? 100 : 50);
+    audioManager.playExplosion();
     setGameState(prev => ({ 
       ...prev, 
       screenShake: isNuke ? 40 : 15,
@@ -744,6 +880,8 @@ export default function App() {
   }, []);
 
   const startGame = () => {
+    audioManager.resume();
+    audioManager.startMusic();
     const newState: GameState = {
       score: 0,
       level: 1,
@@ -766,6 +904,7 @@ export default function App() {
   };
 
   const restartLevel = () => {
+    audioManager.resume();
     if (gameState.retries > 0) {
       const currentLevel = gameState.level;
       const newState: GameState = {
@@ -810,6 +949,7 @@ export default function App() {
     };
 
     shoot();
+    audioManager.playShoot();
     if (tank.type === EntityType.PLAYER) {
       setGameState(prev => ({ ...prev, screenShake: Math.max(prev.screenShake, 2) }));
       if (tank.tripleShotTimer > 0) {
@@ -824,7 +964,11 @@ export default function App() {
 
   const update = () => {
     const state = gameStateRef.current;
-    if (state.isPaused || state.isGameOver || !state.gameStarted) return;
+    if (state.isPaused || state.isGameOver || !state.gameStarted) {
+      audioManager.stopMusic();
+      return;
+    }
+    audioManager.startMusic();
 
     const player = playerRef.current;
     if (!player) return;
@@ -855,18 +999,39 @@ export default function App() {
     // Player Input
     let dx = 0, dy = 0;
     if (player.stunned <= 0) {
+      // Keyboard Input
       if (keysRef.current.has('ArrowUp') || keysRef.current.has('w')) dy -= 1;
       if (keysRef.current.has('ArrowDown') || keysRef.current.has('s')) dy += 1;
       if (keysRef.current.has('ArrowLeft') || keysRef.current.has('a')) dx -= 1;
       if (keysRef.current.has('ArrowRight') || keysRef.current.has('d')) dx += 1;
       
+      // Joystick Input (Mobile)
+      if (joystickRef.current.x !== 0 || joystickRef.current.y !== 0) {
+        dx = joystickRef.current.x;
+        dy = joystickRef.current.y;
+      }
+
       if (dx !== 0 || dy !== 0) {
         const mag = Math.sqrt(dx * dx + dy * dy);
         player.move(dx / mag, dy / mag, wallsRef.current);
+        
+        // Update angle based on movement if not auto-firing
+        if (!isMobile) {
+            player.angle = Math.atan2(dy, dx);
+        }
       }
 
-      if (keysRef.current.has(' ') || keysRef.current.has('Spacebar')) {
-        handleShoot(player);
+      // Shooting Logic
+      if (isMobile) {
+        // Auto-fire on mobile: Always fire in current direction if moving or just always if alive
+        if (player.cooldown <= 0) {
+          handleShoot(player);
+        }
+      } else {
+        // Manual fire on desktop
+        if (keysRef.current.has(' ') || keysRef.current.has('Spacebar')) {
+          handleShoot(player);
+        }
       }
     } else {
       player.stunned--;
@@ -874,26 +1039,29 @@ export default function App() {
 
     if (player.cooldown > 0) player.cooldown--;
     if (player.invulnerable > 0) player.invulnerable--;
+    if (player.mudImmunity > 0) player.mudImmunity--;
 
     // Mud Pit Collision
     mudPitsRef.current.forEach(pit => {
       const circle = pit.getCollisionCircle();
       
       // Player vs Mud
-      if (player.stunned <= 0) {
+      if (player.stunned <= 0 && player.mudImmunity <= 0) {
         const dist = Math.hypot(player.x - circle.x, player.y - circle.y);
         if (dist < circle.r) {
           player.stunned = 180; // 3 seconds
+          player.mudImmunity = 420; // 7 seconds immunity (3s stunned + 4s to escape)
           particlesRef.current.push(new Particle(player.x, player.y - 20, '#451a03', 'STUCK!'));
         }
       }
 
       // Enemies vs Mud
       enemiesRef.current.forEach(enemy => {
-        if (enemy.stunned <= 0) {
+        if (enemy.stunned <= 0 && enemy.mudImmunity <= 0) {
           const dist = Math.hypot(enemy.x - circle.x, enemy.y - circle.y);
           if (dist < circle.r) {
             enemy.stunned = 180;
+            enemy.mudImmunity = 420;
             particlesRef.current.push(new Particle(enemy.x, enemy.y - 20, '#451a03', 'STUCK!'));
           }
         }
@@ -932,6 +1100,7 @@ export default function App() {
           if (wall.isBrick) {
             wall.health -= bullet.power;
             createExplosion(bullet.x, bullet.y, '#78350f', 3);
+            audioManager.playExplosion();
           }
           break;
         }
@@ -971,10 +1140,12 @@ export default function App() {
           if (base.hasShield) {
             base.hasShield = false;
             createExplosion(bullet.x, bullet.y, '#3b82f6', 10);
+            audioManager.playExplosion();
             setGameState(prev => ({ ...prev, screenShake: 5 }));
           } else {
             base.health -= bullet.power;
             createExplosion(bullet.x, bullet.y, base.color, 15);
+            audioManager.playExplosion();
             setGameState(prev => ({ ...prev, screenShake: 8 }));
             
             if (base.health <= 0) {
@@ -1013,6 +1184,7 @@ export default function App() {
             player.invulnerable = 120;
             player.stunned = 30;
             createExplosion(player.x, player.y, player.color, 30);
+            audioManager.playExplosion();
             setGameState(prev => {
               const newLives = prev.lives - 1;
               if (newLives <= 0) {
@@ -1033,6 +1205,7 @@ export default function App() {
           if (dist < TANK_SIZE / 2) {
             bullet.active = false;
             enemy.health -= bullet.power;
+            audioManager.playExplosion();
             
             if (enemy.health <= 0) {
               createExplosion(enemy.x, enemy.y, enemy.color, 30);
@@ -1079,6 +1252,7 @@ export default function App() {
 
     // Update Enemies
     enemiesRef.current.forEach(enemy => {
+      if (enemy.mudImmunity > 0) enemy.mudImmunity--;
       if (freezeTimerRef.current > 0) return;
       if (enemy.stunned > 0) {
         enemy.stunned--;
@@ -1123,6 +1297,7 @@ export default function App() {
       if (dist < TANK_SIZE) {
         pu.active = false;
         createExplosion(pu.x, pu.y, pu.getColor(), 20);
+        audioManager.playPowerUp();
         if (pu.type === PowerUpType.EXTRA_LIFE) setGameState(prev => ({ ...prev, lives: prev.lives + 1 }));
         if (pu.type === PowerUpType.RAPID_FIRE) player.rapidFireTimer = 600;
         if (pu.type === PowerUpType.TRIPLE_SHOT) player.tripleShotTimer = 600;
@@ -1316,9 +1491,9 @@ export default function App() {
               </div>
               <button 
                 onClick={() => setGameState(prev => ({ ...prev, isPaused: !prev.isPaused }))}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                className="p-3 hover:bg-white/10 rounded-full transition-colors bg-white/5"
               >
-                {gameState.isPaused ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}
+                {gameState.isPaused ? <Play className="w-6 h-6" /> : <Pause className="w-6 h-6" />}
               </button>
             </div>
           </motion.div>
@@ -1337,6 +1512,36 @@ export default function App() {
 
           {/* Overlay Screens */}
           <AnimatePresence>
+            {isMobile && gameState.gameStarted && !gameState.isGameOver && !gameState.isPaused && (
+              <div className="absolute inset-0 z-50 pointer-events-none">
+                {/* Joystick */}
+                <div className="absolute bottom-8 left-8 w-24 h-24 bg-white/5 backdrop-blur-sm rounded-full border border-white/10 flex items-center justify-center touch-none pointer-events-auto opacity-60">
+                  <motion.div
+                    drag
+                    dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+                    dragElastic={0.5}
+                    onDrag={(_, info) => {
+                      const x = Math.max(-1, Math.min(1, info.offset.x / 30));
+                      const y = Math.max(-1, Math.min(1, info.offset.y / 30));
+                      joystickRef.current = { x, y };
+                    }}
+                    onDragEnd={() => {
+                      joystickRef.current = { x: 0, y: 0 };
+                    }}
+                    className="w-8 h-8 bg-emerald-500/80 rounded-full shadow-lg shadow-emerald-500/20 cursor-grab active:cursor-grabbing"
+                  />
+                </div>
+                {/* Shoot Button */}
+                <button
+                  onTouchStart={() => keysRef.current.add(' ')}
+                  onTouchEnd={() => keysRef.current.delete(' ')}
+                  className="absolute bottom-8 right-8 w-20 h-20 bg-rose-500/10 backdrop-blur-sm rounded-full border border-rose-500/20 flex items-center justify-center touch-none pointer-events-auto active:bg-rose-500/30 transition-colors opacity-60"
+                >
+                  <Zap className="w-8 h-8 text-rose-500/80" />
+                </button>
+              </div>
+            )}
+
             {!gameState.gameStarted && (
               <motion.div 
                 initial={{ opacity: 0 }}
@@ -1370,15 +1575,15 @@ export default function App() {
                 <div className="mt-12 grid grid-cols-3 gap-8 text-zinc-500">
                   <div className="flex flex-col items-center gap-2">
                     <div className="p-3 bg-white/5 rounded-xl"><Gamepad2 className="w-6 h-6" /></div>
-                    <span className="text-xs font-mono uppercase tracking-tighter">WASD 控制</span>
+                    <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '摇杆控制' : 'WASD 控制'}</span>
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <div className="p-3 bg-white/5 rounded-xl"><Zap className="w-6 h-6" /></div>
-                    <span className="text-xs font-mono uppercase tracking-tighter">空格 射击</span>
+                    <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '自动射击' : '空格 射击'}</span>
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <div className="p-3 bg-white/5 rounded-xl"><Shield className="w-6 h-6" /></div>
-                    <span className="text-xs font-mono uppercase tracking-tighter">P 暂停</span>
+                    <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '点击暂停' : 'P 暂停'}</span>
                   </div>
                 </div>
               </motion.div>
