@@ -725,11 +725,16 @@ export default function App() {
   const freezeTimerRef = useRef<number>(0);
   const joystickRef = useRef({ x: 0, y: 0 });
   const [isMobile, setIsMobile] = useState(false);
+  const isMobileRef = useRef(false);
 
   // Detect mobile
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024);
+      const mobile = 'ontouchstart' in window || 
+                    (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) || 
+                    window.innerWidth < 1024;
+      setIsMobile(mobile);
+      isMobileRef.current = mobile;
     };
     checkMobile();
     window.addEventListener('resize', checkMobile);
@@ -1022,16 +1027,14 @@ export default function App() {
       }
 
       // Shooting Logic
-      if (isMobile) {
-        // Auto-fire on mobile: Always fire in current direction if moving or just always if alive
-        if (player.cooldown <= 0) {
-          handleShoot(player);
-        }
-      } else {
-        // Manual fire on desktop
-        if (keysRef.current.has(' ') || keysRef.current.has('Spacebar')) {
-          handleShoot(player);
-        }
+      // Auto-fire enabled for everyone as requested
+      if (player.cooldown <= 0) {
+        handleShoot(player);
+      }
+      
+      // Manual fire still works for extra burst or if auto-fire is preferred with space
+      if (!isMobileRef.current && (keysRef.current.has(' ') || keysRef.current.has('Spacebar'))) {
+        handleShoot(player);
       }
     } else {
       player.stunned--;
@@ -1040,6 +1043,10 @@ export default function App() {
     if (player.cooldown > 0) player.cooldown--;
     if (player.invulnerable > 0) player.invulnerable--;
     if (player.mudImmunity > 0) player.mudImmunity--;
+    
+    enemiesRef.current.forEach(enemy => {
+      if (enemy.mudImmunity > 0) enemy.mudImmunity--;
+    });
 
     // Mud Pit Collision
     mudPitsRef.current.forEach(pit => {
@@ -1061,7 +1068,7 @@ export default function App() {
           const dist = Math.hypot(enemy.x - circle.x, enemy.y - circle.y);
           if (dist < circle.r) {
             enemy.stunned = 180;
-            enemy.mudImmunity = 420;
+            enemy.mudImmunity = 600; // 10 seconds total (3s stunned + 7s to escape)
             particlesRef.current.push(new Particle(enemy.x, enemy.y - 20, '#451a03', 'STUCK!'));
           }
         }
@@ -1252,7 +1259,6 @@ export default function App() {
 
     // Update Enemies
     enemiesRef.current.forEach(enemy => {
-      if (enemy.mudImmunity > 0) enemy.mudImmunity--;
       if (freezeTimerRef.current > 0) return;
       if (enemy.stunned > 0) {
         enemy.stunned--;
@@ -1515,29 +1521,29 @@ export default function App() {
             {isMobile && gameState.gameStarted && !gameState.isGameOver && !gameState.isPaused && (
               <div className="absolute inset-0 z-50 pointer-events-none">
                 {/* Joystick */}
-                <div className="absolute bottom-8 left-8 w-24 h-24 bg-white/5 backdrop-blur-sm rounded-full border border-white/10 flex items-center justify-center touch-none pointer-events-auto opacity-60">
+                <div className="absolute bottom-6 left-6 w-20 h-20 bg-white/5 backdrop-blur-sm rounded-full border border-white/10 flex items-center justify-center touch-none pointer-events-auto opacity-40">
                   <motion.div
                     drag
                     dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
                     dragElastic={0.5}
                     onDrag={(_, info) => {
-                      const x = Math.max(-1, Math.min(1, info.offset.x / 30));
-                      const y = Math.max(-1, Math.min(1, info.offset.y / 30));
+                      const x = Math.max(-1, Math.min(1, info.offset.x / 25));
+                      const y = Math.max(-1, Math.min(1, info.offset.y / 25));
                       joystickRef.current = { x, y };
                     }}
                     onDragEnd={() => {
                       joystickRef.current = { x: 0, y: 0 };
                     }}
-                    className="w-8 h-8 bg-emerald-500/80 rounded-full shadow-lg shadow-emerald-500/20 cursor-grab active:cursor-grabbing"
+                    className="w-6 h-6 bg-emerald-500/60 rounded-full shadow-lg shadow-emerald-500/10 cursor-grab active:cursor-grabbing"
                   />
                 </div>
                 {/* Shoot Button */}
                 <button
                   onTouchStart={() => keysRef.current.add(' ')}
                   onTouchEnd={() => keysRef.current.delete(' ')}
-                  className="absolute bottom-8 right-8 w-20 h-20 bg-rose-500/10 backdrop-blur-sm rounded-full border border-rose-500/20 flex items-center justify-center touch-none pointer-events-auto active:bg-rose-500/30 transition-colors opacity-60"
+                  className="absolute bottom-6 right-6 w-16 h-16 bg-rose-500/5 backdrop-blur-sm rounded-full border border-rose-500/10 flex items-center justify-center touch-none pointer-events-auto active:bg-rose-500/20 transition-colors opacity-40"
                 >
-                  <Zap className="w-8 h-8 text-rose-500/80" />
+                  <Zap className="w-6 h-6 text-rose-500/60" />
                 </button>
               </div>
             )}
