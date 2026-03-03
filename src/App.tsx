@@ -754,12 +754,26 @@ export default function App() {
 
   const toggleFullscreen = () => {
     if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(err => {
-        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
-      });
+    
+    if (isMobile) {
+      // For mobile, we toggle our own state immediately as native fullscreen is unreliable
+      const nextState = !isFullscreen;
+      setIsFullscreen(nextState);
+      
+      // Still try native for browsers that support it (like Android Chrome)
+      if (nextState) {
+        containerRef.current.requestFullscreen().catch(() => {});
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
     } else {
-      document.exitFullscreen();
+      if (!document.fullscreenElement) {
+        containerRef.current.requestFullscreen().catch(err => {
+          console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+        });
+      } else {
+        document.exitFullscreen();
+      }
     }
   };
 
@@ -1494,10 +1508,15 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-zinc-950 font-sans selection:bg-emerald-500/30 overflow-hidden">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-950 font-sans selection:bg-emerald-500/30 overflow-hidden">
       <div className="scanline"></div>
       
-      <div ref={containerRef} className={`relative flex flex-col items-center justify-center w-full h-full ${isFullscreen ? 'bg-zinc-950' : ''}`}>
+      <div 
+        ref={containerRef} 
+        className={`relative flex flex-col items-center justify-center w-full h-full transition-all duration-300 ${
+          isFullscreen ? 'fixed inset-0 z-[100] bg-zinc-950' : 'p-4'
+        }`}
+      >
         {/* HUD */}
         <AnimatePresence>
           {gameState.gameStarted && (
@@ -1707,7 +1726,8 @@ export default function App() {
           </div>
 
           {/* Sidebar / Instructions */}
-          <div className="w-full lg:w-72 flex flex-col gap-6">
+          {!gameState.gameStarted && (
+            <div className="w-full lg:w-72 flex flex-col gap-6">
             <div className="glass p-6 rounded-3xl">
               <div className="flex items-center gap-2 mb-4 text-emerald-400">
                 <Info className="w-5 h-5" />
@@ -1778,6 +1798,7 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
         </div>
       </div>
 
