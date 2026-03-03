@@ -1019,11 +1019,6 @@ export default function App() {
       if (dx !== 0 || dy !== 0) {
         const mag = Math.sqrt(dx * dx + dy * dy);
         player.move(dx / mag, dy / mag, wallsRef.current);
-        
-        // Update angle based on movement if not auto-firing
-        if (!isMobile) {
-            player.angle = Math.atan2(dy, dx);
-        }
       }
 
       // Shooting Logic
@@ -1521,29 +1516,30 @@ export default function App() {
             {isMobile && gameState.gameStarted && !gameState.isGameOver && !gameState.isPaused && (
               <div className="absolute inset-0 z-50 pointer-events-none">
                 {/* Joystick */}
-                <div className="absolute bottom-6 left-6 w-20 h-20 bg-white/5 backdrop-blur-sm rounded-full border border-white/10 flex items-center justify-center touch-none pointer-events-auto opacity-40">
+                <div className="absolute bottom-10 left-10 w-32 h-32 bg-white/10 backdrop-blur-md rounded-full border-2 border-white/20 flex items-center justify-center touch-none pointer-events-auto opacity-60">
                   <motion.div
                     drag
-                    dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
-                    dragElastic={0.5}
+                    dragConstraints={{ left: -50, right: 50, top: -50, bottom: 50 }}
+                    dragElastic={0.05}
+                    dragTransition={{ bounceStiffness: 800, bounceDamping: 30 }}
                     onDrag={(_, info) => {
-                      const x = Math.max(-1, Math.min(1, info.offset.x / 25));
-                      const y = Math.max(-1, Math.min(1, info.offset.y / 25));
+                      const x = Math.max(-1, Math.min(1, info.offset.x / 40));
+                      const y = Math.max(-1, Math.min(1, info.offset.y / 40));
                       joystickRef.current = { x, y };
                     }}
                     onDragEnd={() => {
                       joystickRef.current = { x: 0, y: 0 };
                     }}
-                    className="w-6 h-6 bg-emerald-500/60 rounded-full shadow-lg shadow-emerald-500/10 cursor-grab active:cursor-grabbing"
+                    className="w-12 h-12 bg-emerald-500 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.5)] cursor-grab active:cursor-grabbing"
                   />
                 </div>
                 {/* Shoot Button */}
                 <button
                   onTouchStart={() => keysRef.current.add(' ')}
                   onTouchEnd={() => keysRef.current.delete(' ')}
-                  className="absolute bottom-6 right-6 w-16 h-16 bg-rose-500/5 backdrop-blur-sm rounded-full border border-rose-500/10 flex items-center justify-center touch-none pointer-events-auto active:bg-rose-500/20 transition-colors opacity-40"
+                  className="absolute bottom-10 right-10 w-24 h-24 bg-rose-500/20 backdrop-blur-md rounded-full border-2 border-rose-500/30 flex items-center justify-center touch-none pointer-events-auto active:bg-rose-500/40 transition-colors opacity-60"
                 >
-                  <Zap className="w-6 h-6 text-rose-500/60" />
+                  <Zap className="w-10 h-10 text-rose-500" />
                 </button>
               </div>
             )}
@@ -1574,7 +1570,7 @@ export default function App() {
                 >
                   <span className="flex items-center gap-2">
                     <Play className="w-5 h-5 fill-current" />
-                    开始作战
+                    {isMobile ? '点击开始作战' : '开始作战'}
                   </span>
                 </button>
 
