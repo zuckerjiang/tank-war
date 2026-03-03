@@ -18,7 +18,10 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Zap
+  Zap,
+  Maximize2,
+  Minimize2,
+  Skull
 } from 'lucide-react';
 import { 
   GameState, 
@@ -724,8 +727,11 @@ export default function App() {
   const gameStateRef = useRef<GameState>(gameState);
   const freezeTimerRef = useRef<number>(0);
   const joystickRef = useRef({ x: 0, y: 0 });
+  const touchTargetRef = useRef<{ x: number, y: number } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const isMobileRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Detect mobile
   useEffect(() => {
@@ -745,6 +751,47 @@ export default function App() {
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
+
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const handleCanvasTouch = (e: React.TouchEvent) => {
+    if (!gameState.gameStarted || gameState.isPaused || gameState.isGameOver) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    
+    // Calculate touch position relative to canvas coordinate system (800x600)
+    const scaleX = GAME_WIDTH / rect.width;
+    const scaleY = GAME_HEIGHT / rect.height;
+    
+    touchTargetRef.current = {
+      x: (touch.clientX - rect.left) * scaleX,
+      y: (touch.clientY - rect.top) * scaleY
+    };
+  };
+
+  const handleTouchEnd = () => {
+    touchTargetRef.current = null;
+  };
 
   const triggerBarrelExplosion = (barrel: Barrel) => {
     if (!barrel.active) return;
@@ -1010,8 +1057,18 @@ export default function App() {
       if (keysRef.current.has('ArrowLeft') || keysRef.current.has('a')) dx -= 1;
       if (keysRef.current.has('ArrowRight') || keysRef.current.has('d')) dx += 1;
       
-      // Joystick Input (Mobile)
-      if (joystickRef.current.x !== 0 || joystickRef.current.y !== 0) {
+      // Direct Touch Input (Mobile)
+      if (touchTargetRef.current) {
+        const targetX = touchTargetRef.current.x;
+        const targetY = touchTargetRef.current.y;
+        const dist = Math.hypot(targetX - player.x, targetY - player.y);
+        
+        if (dist > 10) { // Deadzone to prevent jitter
+          dx = (targetX - player.x) / dist;
+          dy = (targetY - player.y) / dist;
+        }
+      } else if (joystickRef.current.x !== 0 || joystickRef.current.y !== 0) {
+        // Fallback to Joystick if no direct touch
         dx = joystickRef.current.x;
         dy = joystickRef.current.y;
       }
@@ -1437,329 +1494,290 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-zinc-950 font-sans selection:bg-emerald-500/30">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-zinc-950 font-sans selection:bg-emerald-500/30 overflow-hidden">
       <div className="scanline"></div>
       
-      {/* HUD */}
-      <AnimatePresence>
-        {gameState.gameStarted && (
-          <motion.div 
-            initial={{ y: -50, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="w-full max-w-[800px] flex items-center justify-between mb-4 px-6 py-3 glass rounded-2xl z-20"
-          >
-            <div className="flex items-center gap-6">
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-mono">Score</span>
-                <span className="text-xl font-bold font-display text-emerald-400">{gameState.score.toLocaleString()}</span>
+      <div ref={containerRef} className={`relative flex flex-col items-center justify-center w-full h-full ${isFullscreen ? 'bg-zinc-950' : ''}`}>
+        {/* HUD */}
+        <AnimatePresence>
+          {gameState.gameStarted && (
+            <motion.div 
+              initial={{ y: -50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className={`w-full max-w-[800px] flex items-center justify-between mb-4 px-6 py-3 glass rounded-2xl z-20 ${isFullscreen ? 'absolute top-4 left-1/2 -translate-x-1/2' : ''}`}
+            >
+              <div className="flex items-center gap-6">
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-mono">Score</span>
+                  <span className="text-xl font-bold font-display text-emerald-400">{gameState.score.toLocaleString()}</span>
+                </div>
+                <div className="h-8 w-px bg-white/10"></div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-mono">Level</span>
+                  <span className="text-xl font-bold font-display text-white">{gameState.level}</span>
+                </div>
+                <div className="h-8 w-px bg-white/10"></div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-mono">Lives</span>
+                  <div className="flex items-center gap-1.5">
+                    <Heart className="w-4 h-4 text-rose-500 fill-rose-500 animate-pulse" />
+                    <span className="text-xl font-bold font-display text-white">{gameState.lives}</span>
+                  </div>
+                </div>
               </div>
-              <div className="h-8 w-px bg-white/10"></div>
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-mono">Combo</span>
-                <span className={`text-xl font-bold font-display transition-all ${gameState.combo > 0 ? 'text-amber-400 scale-110' : 'text-zinc-600'}`}>
-                  x{gameState.combo}
-                </span>
-              </div>
-              <div className="h-8 w-px bg-white/10"></div>
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-mono">Level</span>
-                <span className="text-xl font-bold font-display text-white">{gameState.level}</span>
-              </div>
-            </div>
 
-            <div className="flex items-center gap-4">
-              {gameState.slowMotion > 0 && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex items-center gap-2 px-3 py-1 bg-amber-500/20 border border-amber-500/40 rounded-full"
+              <div className="flex items-center gap-4">
+                {isMobile && (
+                  <button 
+                    onClick={toggleFullscreen}
+                    className="p-2 hover:bg-white/10 rounded-full transition-colors bg-white/5 text-zinc-400"
+                  >
+                    {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                  </button>
+                )}
+                <button 
+                  onClick={() => setGameState(prev => ({ ...prev, isPaused: !prev.isPaused }))}
+                  className="p-3 hover:bg-white/10 rounded-full transition-colors bg-white/5"
                 >
-                  <Zap className="w-3 h-3 text-amber-400 animate-pulse" />
-                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-tighter">Slow-Mo</span>
+                  {gameState.isPaused ? <Play className="w-6 h-6" /> : <Pause className="w-6 h-6" />}
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="relative flex flex-col lg:flex-row gap-6 items-start w-full max-w-[800px]">
+          {/* Game Canvas Container */}
+          <div className={`relative glass p-1 rounded-3xl overflow-hidden shadow-2xl shadow-emerald-500/10 w-full ${isFullscreen ? 'h-screen rounded-none p-0' : ''}`}>
+            <canvas
+              ref={canvasRef}
+              width={GAME_WIDTH}
+              height={GAME_HEIGHT}
+              onTouchStart={handleCanvasTouch}
+              onTouchMove={handleCanvasTouch}
+              onTouchEnd={handleTouchEnd}
+              className={`rounded-2xl cursor-crosshair bg-zinc-900 w-full aspect-[4/3] ${isFullscreen ? 'h-full rounded-none object-contain' : 'max-w-[800px]'}`}
+            />
+
+            {/* Overlay Screens */}
+            <AnimatePresence>
+              {isMobile && gameState.gameStarted && !gameState.isGameOver && !gameState.isPaused && (
+                <div className="absolute inset-0 z-50 pointer-events-none">
+                  {/* Shoot Button - Optional for manual burst */}
+                  <button
+                    onTouchStart={() => keysRef.current.add(' ')}
+                    onTouchEnd={() => keysRef.current.delete(' ')}
+                    className="absolute bottom-10 right-10 w-24 h-24 bg-rose-500/20 backdrop-blur-md rounded-full border-2 border-rose-500/30 flex items-center justify-center touch-none pointer-events-auto active:bg-rose-500/40 transition-colors opacity-60"
+                  >
+                    <Zap className="w-10 h-10 text-rose-500" />
+                  </button>
+                  
+                  {/* Hint for direct touch */}
+                  <div className="absolute top-24 left-1/2 -translate-x-1/2 text-white/30 text-xs font-mono uppercase tracking-widest pointer-events-none text-center">
+                    手指点击或拖拽控制坦克移动
+                  </div>
+                </div>
+              )}
+
+              {!gameState.gameStarted && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm p-8 text-center"
+                >
+                  <motion.div
+                    initial={{ y: 20 }}
+                    animate={{ y: 0 }}
+                    className="mb-8"
+                  >
+                    <h1 className="text-6xl font-black font-display tracking-tighter text-white mb-2">
+                      TANK <span className="text-emerald-500">BATTLE</span>
+                    </h1>
+                    <p className="text-zinc-400 max-w-md mx-auto">
+                      精英坦克指挥官，准备好迎接挑战了吗？摧毁敌方单位，升级你的装备，在战场上生存下来。
+                    </p>
+                  </motion.div>
+
+                  <button 
+                    onClick={() => {
+                      startGame();
+                      if (isMobile) toggleFullscreen();
+                    }}
+                    className="group relative px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(16,185,129,0.3)]"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Play className="w-5 h-5 fill-current" />
+                      {isMobile ? '点击进入全屏作战' : '开始作战'}
+                    </span>
+                  </button>
+
+                  <div className="mt-12 grid grid-cols-3 gap-8 text-zinc-500">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="p-3 bg-white/5 rounded-xl"><Gamepad2 className="w-6 h-6" /></div>
+                      <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '手指触控' : 'WASD 控制'}</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="p-3 bg-white/5 rounded-xl"><Zap className="w-6 h-6" /></div>
+                      <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '自动射击' : '空格 射击'}</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="p-3 bg-white/5 rounded-xl"><Shield className="w-6 h-6" /></div>
+                      <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '点击暂停' : 'P 暂停'}</span>
+                    </div>
+                  </div>
                 </motion.div>
               )}
-              <div className="flex flex-col items-end">
-                <span className="text-[10px] uppercase tracking-widest text-emerald-400 font-mono">Retries</span>
-                <span className="text-xs font-bold text-white">{gameState.retries}</span>
-              </div>
-              <div className="flex flex-col items-end">
-                <span className="text-[10px] uppercase tracking-widest text-emerald-400 font-mono">Lives</span>
-                <div className="flex gap-1">
-                  {Array.from({ length: gameState.lives }).map((_, i) => (
-                    <Heart key={i} className="w-4 h-4 text-rose-500 fill-rose-500" />
-                  ))}
-                </div>
-              </div>
-              <button 
-                onClick={() => setGameState(prev => ({ ...prev, isPaused: !prev.isPaused }))}
-                className="p-3 hover:bg-white/10 rounded-full transition-colors bg-white/5"
-              >
-                {gameState.isPaused ? <Play className="w-6 h-6" /> : <Pause className="w-6 h-6" />}
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      <div className="relative flex flex-col lg:flex-row gap-6 items-start">
-        {/* Game Canvas Container */}
-        <div className="relative glass p-1 rounded-3xl overflow-hidden shadow-2xl shadow-emerald-500/10">
-          <canvas
-            ref={canvasRef}
-            width={GAME_WIDTH}
-            height={GAME_HEIGHT}
-            className="rounded-2xl cursor-crosshair bg-zinc-900 w-full max-w-[800px] aspect-[4/3]"
-          />
-
-          {/* Overlay Screens */}
-          <AnimatePresence>
-            {isMobile && gameState.gameStarted && !gameState.isGameOver && !gameState.isPaused && (
-              <div className="absolute inset-0 z-50 pointer-events-none">
-                {/* Joystick */}
-                <div className="absolute bottom-10 left-10 w-32 h-32 bg-white/10 backdrop-blur-md rounded-full border-2 border-white/20 flex items-center justify-center touch-none pointer-events-auto opacity-60">
-                  <motion.div
-                    drag
-                    dragConstraints={{ left: -50, right: 50, top: -50, bottom: 50 }}
-                    dragElastic={0.05}
-                    dragTransition={{ bounceStiffness: 800, bounceDamping: 30 }}
-                    onDrag={(_, info) => {
-                      const x = Math.max(-1, Math.min(1, info.offset.x / 40));
-                      const y = Math.max(-1, Math.min(1, info.offset.y / 40));
-                      joystickRef.current = { x, y };
-                    }}
-                    onDragEnd={() => {
-                      joystickRef.current = { x: 0, y: 0 };
-                    }}
-                    className="w-12 h-12 bg-emerald-500 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.5)] cursor-grab active:cursor-grabbing"
-                  />
-                </div>
-                {/* Shoot Button */}
-                <button
-                  onTouchStart={() => keysRef.current.add(' ')}
-                  onTouchEnd={() => keysRef.current.delete(' ')}
-                  className="absolute bottom-10 right-10 w-24 h-24 bg-rose-500/20 backdrop-blur-md rounded-full border-2 border-rose-500/30 flex items-center justify-center touch-none pointer-events-auto active:bg-rose-500/40 transition-colors opacity-60"
+              {gameState.isPaused && !gameState.isGameOver && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md"
                 >
-                  <Zap className="w-10 h-10 text-rose-500" />
-                </button>
-              </div>
-            )}
-
-            {!gameState.gameStarted && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm p-8 text-center"
-              >
-                <motion.div
-                  initial={{ y: 20 }}
-                  animate={{ y: 0 }}
-                  className="mb-8"
-                >
-                  <h1 className="text-6xl font-black font-display tracking-tighter text-white mb-2">
-                    TANK <span className="text-emerald-500">BATTLE</span>
-                  </h1>
-                  <p className="text-zinc-400 max-w-md mx-auto">
-                    精英坦克指挥官，准备好迎接挑战了吗？摧毁敌方单位，升级你的装备，在战场上生存下来。
-                  </p>
+                  <h2 className="text-4xl font-bold font-display text-white mb-8">战事暂停</h2>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => setGameState(prev => ({ ...prev, isPaused: false }))}
+                      className="px-6 py-3 bg-white text-black font-bold rounded-xl hover:bg-zinc-200 transition-all"
+                    >
+                      继续战斗
+                    </button>
+                    <button 
+                      onClick={() => setGameState(prev => ({ ...prev, gameStarted: false, isPaused: false }))}
+                      className="px-6 py-3 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-all"
+                    >
+                      退出游戏
+                    </button>
+                  </div>
                 </motion.div>
+              )}
 
-                <button 
-                  onClick={startGame}
-                  className="group relative px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(16,185,129,0.3)]"
+              {gameState.isGameOver && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className={`absolute inset-0 z-30 flex flex-col items-center justify-center backdrop-blur-xl p-8 ${gameState.winner === 'PLAYER' ? 'bg-emerald-950/90' : 'bg-rose-950/90'}`}
                 >
-                  <span className="flex items-center gap-2">
-                    <Play className="w-5 h-5 fill-current" />
-                    {isMobile ? '点击开始作战' : '开始作战'}
-                  </span>
-                </button>
-
-                <div className="mt-12 grid grid-cols-3 gap-8 text-zinc-500">
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="p-3 bg-white/5 rounded-xl"><Gamepad2 className="w-6 h-6" /></div>
-                    <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '摇杆控制' : 'WASD 控制'}</span>
+                  {gameState.winner === 'PLAYER' ? (
+                    <Trophy className="w-20 h-20 text-yellow-500 mb-6 drop-shadow-[0_0_20px_rgba(234,179,8,0.5)]" />
+                  ) : (
+                    <Heart className="w-20 h-20 text-rose-500 mb-6 opacity-20" />
+                  )}
+                  
+                  <h2 className="text-5xl font-black font-display text-white mb-2">
+                    {gameState.winner === 'PLAYER' ? '任务完成' : '任务失败'}
+                  </h2>
+                  <p className="text-white/60 mb-8">
+                    {gameState.winner === 'PLAYER' ? '你成功摧毁了敌方基地！' : '你的基地已被摧毁！'}
+                  </p>
+                  
+                  <div className="glass-dark p-6 rounded-2xl mb-8 w-full max-w-xs">
+                    <div className="flex justify-between mb-2">
+                      <span className="text-white/40 uppercase text-[10px] tracking-widest">最终得分</span>
+                      <span className="text-xl font-bold font-mono">{gameState.score.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-white/40 uppercase text-[10px] tracking-widest">最高关卡</span>
+                      <span className="text-xl font-bold font-mono">{gameState.level}</span>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="p-3 bg-white/5 rounded-xl"><Zap className="w-6 h-6" /></div>
-                    <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '自动射击' : '空格 射击'}</span>
+
+                  <div className="flex flex-col gap-4 w-full max-w-xs">
+                    <button 
+                      onClick={restartLevel}
+                      disabled={gameState.retries <= 0}
+                      className={`flex items-center justify-center gap-2 px-8 py-4 bg-white text-black font-bold rounded-2xl hover:scale-105 transition-all shadow-xl w-full ${gameState.retries <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <RotateCcw className="w-5 h-5" />
+                      重试当前关卡 ({gameState.retries})
+                    </button>
+                    <button 
+                      onClick={startGame}
+                      className="flex items-center justify-center gap-2 px-8 py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/20 transition-all border border-white/20 w-full"
+                    >
+                      <RotateCcw className="w-5 h-5" />
+                      从第一关开始
+                    </button>
                   </div>
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="p-3 bg-white/5 rounded-xl"><Shield className="w-6 h-6" /></div>
-                    <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '点击暂停' : 'P 暂停'}</span>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
-            {gameState.isPaused && !gameState.isGameOver && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md"
-              >
-                <h2 className="text-4xl font-bold font-display text-white mb-8">战事暂停</h2>
-                <div className="flex gap-4">
-                  <button 
-                    onClick={() => setGameState(prev => ({ ...prev, isPaused: false }))}
-                    className="px-6 py-3 bg-white text-black font-bold rounded-xl hover:bg-zinc-200 transition-all"
-                  >
-                    继续战斗
-                  </button>
-                  <button 
-                    onClick={() => setGameState(prev => ({ ...prev, gameStarted: false, isPaused: false }))}
-                    className="px-6 py-3 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-all"
-                  >
-                    退出游戏
-                  </button>
-                </div>
-              </motion.div>
-            )}
-
-            {gameState.isGameOver && (
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className={`absolute inset-0 z-30 flex flex-col items-center justify-center backdrop-blur-xl p-8 ${gameState.winner === 'PLAYER' ? 'bg-emerald-950/90' : 'bg-rose-950/90'}`}
-              >
-                {gameState.winner === 'PLAYER' ? (
-                  <Trophy className="w-20 h-20 text-yellow-500 mb-6 drop-shadow-[0_0_20px_rgba(234,179,8,0.5)]" />
-                ) : (
-                  <Heart className="w-20 h-20 text-rose-500 mb-6 opacity-20" />
-                )}
-                
-                <h2 className="text-5xl font-black font-display text-white mb-2">
-                  {gameState.winner === 'PLAYER' ? '任务完成' : '任务失败'}
-                </h2>
-                <p className="text-white/60 mb-8">
-                  {gameState.winner === 'PLAYER' ? '你成功摧毁了敌方基地！' : '你的基地已被摧毁！'}
-                </p>
-                
-                <div className="glass-dark p-6 rounded-2xl mb-8 w-full max-w-xs">
-                  <div className="flex justify-between mb-2">
-                    <span className="text-white/40 uppercase text-[10px] tracking-widest">最终得分</span>
-                    <span className="text-xl font-bold font-mono">{gameState.score.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-white/40 uppercase text-[10px] tracking-widest">最高关卡</span>
-                    <span className="text-xl font-bold font-mono">{gameState.level}</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4 w-full max-w-xs">
-                  <button 
-                    onClick={restartLevel}
-                    disabled={gameState.retries <= 0}
-                    className={`flex items-center justify-center gap-2 px-8 py-4 bg-white text-black font-bold rounded-2xl hover:scale-105 transition-all shadow-xl w-full ${gameState.retries <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <RotateCcw className="w-5 h-5" />
-                    重试当前关卡 ({gameState.retries})
-                  </button>
-                  <button 
-                    onClick={startGame}
-                    className="flex items-center justify-center gap-2 px-8 py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/20 transition-all border border-white/20 w-full"
-                  >
-                    <RotateCcw className="w-5 h-5" />
-                    从第一关开始
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Sidebar / Instructions */}
-        <div className="w-full lg:w-72 flex flex-col gap-6">
-          <div className="glass p-6 rounded-3xl">
-            <div className="flex items-center gap-2 mb-4 text-emerald-400">
-              <Info className="w-5 h-5" />
-              <h3 className="font-bold font-display uppercase tracking-wider text-sm">情报中心</h3>
-            </div>
-            
-            <div className="space-y-4">
-              <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-3 h-3 bg-blue-500 rounded-full shadow-[0_0_8px_#3b82f6]"></div>
-                  <span className="text-xs font-bold text-zinc-300">基地 (Base)</span>
-                </div>
-                <p className="text-[10px] text-zinc-500 leading-relaxed">核心目标。自带一层护盾，护盾消失后需承受三发子弹才会被摧毁。</p>
-              </div>
-
-              <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-3 h-3 bg-emerald-400 rounded-full shadow-[0_0_8px_#4ade80]"></div>
-                  <span className="text-xs font-bold text-zinc-300">坦克对战</span>
-                </div>
-                <p className="text-[10px] text-zinc-500 leading-relaxed">每关增加一辆敌军（最多10辆）。所有敌军都携带工具，击毁后必定掉落！</p>
-              </div>
-
-              <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-3 h-3 bg-amber-800 rounded-sm"></div>
-                  <span className="text-xs font-bold text-zinc-300">砖块墙</span>
-                </div>
-                <p className="text-[10px] text-zinc-500 leading-relaxed">可被摧毁。20次命中完全消失，10次后可透视边缘。</p>
-              </div>
-            </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          <div className="glass p-6 rounded-3xl">
-            <div className="flex items-center gap-2 mb-4 text-blue-400">
-              <Zap className="w-5 h-5" />
-              <h3 className="font-bold font-display uppercase tracking-wider text-sm">补给工具</h3>
+          {/* Sidebar / Instructions */}
+          <div className="w-full lg:w-72 flex flex-col gap-6">
+            <div className="glass p-6 rounded-3xl">
+              <div className="flex items-center gap-2 mb-4 text-emerald-400">
+                <Info className="w-5 h-5" />
+                <h3 className="font-bold font-display uppercase tracking-wider text-sm">情报中心</h3>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full shadow-[0_0_8px_#3b82f6]"></div>
+                    <span className="text-xs font-bold text-zinc-300">基地 (Base)</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 leading-relaxed">核心目标。自带一层护盾，护盾消失后需承受三发子弹才会被摧毁。</p>
+                </div>
+
+                <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-3 h-3 bg-emerald-400 rounded-full shadow-[0_0_8px_#4ade80]"></div>
+                    <span className="text-xs font-bold text-zinc-300">坦克对战</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 leading-relaxed">每关增加一辆敌军（最多10辆）。所有敌军都携带工具，击毁后必定掉落！</p>
+                </div>
+
+                <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-3 h-3 bg-amber-800 rounded-sm"></div>
+                    <span className="text-xs font-bold text-zinc-300">砖块墙</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 leading-relaxed">可被摧毁。20次命中完全消失，10次后可透视边缘。</p>
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-1 gap-3">
-              <div className="flex items-center gap-3 p-2 bg-sky-500/10 rounded-xl border border-sky-500/20">
-                <Info className="w-5 h-5 text-sky-400" />
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-sky-400 uppercase">冷冻 (Freeze)</span>
-                  <span className="text-[8px] text-zinc-500">使其他坦克停止移动 8 秒</span>
-                </div>
+
+            <div className="glass p-6 rounded-3xl">
+              <div className="flex items-center gap-2 mb-4 text-blue-400">
+                <Zap className="w-5 h-5" />
+                <h3 className="font-bold font-display uppercase tracking-wider text-sm">补给工具</h3>
               </div>
-              <div className="flex items-center gap-3 p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
-                <Zap className="w-5 h-5 text-emerald-400" />
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-emerald-400 uppercase">三连射 (Triple)</span>
-                  <span className="text-[8px] text-zinc-500">发射扇形三枚子弹</span>
+              <div className="grid grid-cols-1 gap-3">
+                <div className="flex items-center gap-3 p-2 bg-sky-500/10 rounded-xl border border-sky-500/20">
+                  <Info className="w-5 h-5 text-sky-400" />
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-sky-400 uppercase">冷冻 (Freeze)</span>
+                    <span className="text-[8px] text-zinc-500">使其他坦克停止移动 8 秒</span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-3 p-2 bg-amber-500/10 rounded-xl border border-amber-500/20">
-                <Zap className="w-5 h-5 text-amber-400" />
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-amber-400 uppercase">极速 (Rapid)</span>
-                  <span className="text-[8px] text-zinc-500">大幅提升装弹速度</span>
+                <div className="flex items-center gap-3 p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
+                  <Zap className="w-5 h-5 text-emerald-400" />
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase">三连射 (Triple)</span>
+                    <span className="text-[8px] text-zinc-500">发射扇形三枚子弹</span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-3 p-2 bg-rose-500/10 rounded-xl border border-rose-500/20">
-                <Heart className="w-5 h-5 text-rose-400" />
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-rose-400 uppercase">生命 (Life)</span>
-                  <span className="text-[8px] text-zinc-500">增加坦克生命值</span>
+                <div className="flex items-center gap-3 p-2 bg-amber-500/10 rounded-xl border border-amber-500/20">
+                  <Zap className="w-5 h-5 text-amber-400" />
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-amber-400 uppercase">极速 (Rapid)</span>
+                    <span className="text-[8px] text-zinc-500">大幅提升装弹速度</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-2 bg-rose-500/10 rounded-xl border border-rose-500/20">
+                  <Heart className="w-5 h-5 text-rose-400" />
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-rose-400 uppercase">生命 (Life)</span>
+                    <span className="text-[8px] text-zinc-500">增加坦克生命值</span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Mobile Controls */}
-      <div className="mt-8 lg:hidden grid grid-cols-2 gap-8 w-full max-w-md">
-        <div className="grid grid-cols-3 gap-2">
-          <div />
-          <button className="p-4 glass rounded-2xl active:bg-white/20 touch-none" onPointerDown={() => keysRef.current.add('ArrowUp')} onPointerUp={() => keysRef.current.delete('ArrowUp')}><ChevronUp /></button>
-          <div />
-          <button className="p-4 glass rounded-2xl active:bg-white/20 touch-none" onPointerDown={() => keysRef.current.add('ArrowLeft')} onPointerUp={() => keysRef.current.delete('ArrowLeft')}><ChevronLeft /></button>
-          <button className="p-4 glass rounded-2xl active:bg-white/20 touch-none" onPointerDown={() => keysRef.current.add('ArrowDown')} onPointerUp={() => keysRef.current.delete('ArrowDown')}><ChevronDown /></button>
-          <button className="p-4 glass rounded-2xl active:bg-white/20 touch-none" onPointerDown={() => keysRef.current.add('ArrowRight')} onPointerUp={() => keysRef.current.delete('ArrowRight')}><ChevronRight /></button>
-        </div>
-        <div className="flex items-center justify-center">
-          <button 
-            className="w-24 h-24 bg-emerald-500/20 border-4 border-emerald-500/50 rounded-full flex items-center justify-center active:scale-90 transition-transform touch-none"
-            onPointerDown={() => keysRef.current.add(' ')}
-            onPointerUp={() => keysRef.current.delete(' ')}
-          >
-            <Zap className="w-10 h-10 text-emerald-400" />
-          </button>
         </div>
       </div>
 
