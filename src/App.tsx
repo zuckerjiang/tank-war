@@ -727,6 +727,9 @@ export default function App() {
   const gameStateRef = useRef<GameState>(gameState);
   const freezeTimerRef = useRef<number>(0);
   const joystickRef = useRef({ x: 0, y: 0 });
+  const [joystickActive, setJoystickActive] = useState(false);
+  const [joystickBase, setJoystickBase] = useState({ x: 0, y: 0 });
+  const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
   const touchTargetRef = useRef<{ x: number, y: number } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const isMobileRef = useRef(false);
@@ -787,6 +790,11 @@ export default function App() {
 
   const handleCanvasTouch = (e: React.TouchEvent) => {
     if (!gameState.gameStarted || gameState.isPaused || gameState.isGameOver) return;
+    e.preventDefault();
+    
+    // Only handle direct touch if not using joystick
+    if (joystickActive) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -801,6 +809,49 @@ export default function App() {
       x: (touch.clientX - rect.left) * scaleX,
       y: (touch.clientY - rect.top) * scaleY
     };
+  };
+
+  const handleJoystickStart = (e: React.TouchEvent) => {
+    if (!gameState.gameStarted || gameState.isPaused || gameState.isGameOver) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    setJoystickActive(true);
+    setJoystickBase({ x: touch.clientX, y: touch.clientY });
+    setJoystickPos({ x: touch.clientX, y: touch.clientY });
+    touchTargetRef.current = null; // Joystick takes priority
+  };
+
+  const handleJoystickMove = (e: React.TouchEvent) => {
+    if (!joystickActive) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    
+    const dx = touch.clientX - joystickBase.x;
+    const dy = touch.clientY - joystickBase.y;
+    const dist = Math.hypot(dx, dy);
+    const maxDist = 40;
+    
+    const limitedDist = Math.min(dist, maxDist);
+    const angle = Math.atan2(dy, dx);
+    
+    setJoystickPos({
+      x: joystickBase.x + Math.cos(angle) * limitedDist,
+      y: joystickBase.y + Math.sin(angle) * limitedDist
+    });
+    
+    if (dist > 2) { // Smaller deadzone for joystick
+      joystickRef.current = {
+        x: (dx / dist) * (limitedDist / maxDist),
+        y: (dy / dist) * (limitedDist / maxDist)
+      };
+    } else {
+      joystickRef.current = { x: 0, y: 0 };
+    }
+  };
+
+  const handleJoystickEnd = () => {
+    setJoystickActive(false);
+    joystickRef.current = { x: 0, y: 0 };
   };
 
   const handleTouchEnd = () => {
@@ -1089,7 +1140,8 @@ export default function App() {
 
       if (dx !== 0 || dy !== 0) {
         const mag = Math.sqrt(dx * dx + dy * dy);
-        player.move(dx / mag, dy / mag, wallsRef.current);
+        const speedMultiplier = Math.min(1, mag);
+        player.move((dx / mag) * speedMultiplier, (dy / mag) * speedMultiplier, wallsRef.current);
       }
 
       // Shooting Logic
@@ -1575,25 +1627,51 @@ export default function App() {
               onTouchStart={handleCanvasTouch}
               onTouchMove={handleCanvasTouch}
               onTouchEnd={handleTouchEnd}
-              className={`rounded-2xl cursor-crosshair bg-zinc-900 w-full aspect-[4/3] ${isFullscreen ? 'h-full rounded-none object-contain' : 'max-w-[800px]'}`}
+              className={`rounded-2xl cursor-crosshair bg-zinc-900 w-full aspect-[4/3] ${isFullscreen ? 'h-full rounded-none object-contain' : 'max-w-[800px]'} touch-none`}
             />
 
             {/* Overlay Screens */}
             <AnimatePresence>
               {isMobile && gameState.gameStarted && !gameState.isGameOver && !gameState.isPaused && (
-                <div className="absolute inset-0 z-50 pointer-events-none">
-                  {/* Shoot Button - Optional for manual burst */}
-                  <button
-                    onTouchStart={() => keysRef.current.add(' ')}
-                    onTouchEnd={() => keysRef.current.delete(' ')}
-                    className="absolute bottom-10 right-10 w-24 h-24 bg-rose-500/20 backdrop-blur-md rounded-full border-2 border-rose-500/30 flex items-center justify-center touch-none pointer-events-auto active:bg-rose-500/40 transition-colors opacity-60"
-                  >
-                    <Zap className="w-10 h-10 text-rose-500" />
-                  </button>
+                <div className="absolute inset-0 z-50 pointer-events-none select-none touch-none">
+                  {/* Joystick */}
+                  <div className="absolute bottom-16 left-16 w-32 h-32 flex items-center justify-center pointer-events-auto">
+                    <div 
+                      className="w-28 h-28 bg-white/5 backdrop-blur-md rounded-full border-2 border-white/10 flex items-center justify-center relative shadow-2xl"
+                      onTouchStart={handleJoystickStart}
+                      onTouchMove={handleJoystickMove}
+                      onTouchEnd={handleJoystickEnd}
+                    >
+                      {/* Joystick Base Indicator */}
+                      <div className="absolute inset-0 rounded-full border border-white/5 animate-pulse" />
+                      
+                      <div 
+                        className={`w-14 h-14 rounded-full shadow-2xl transition-transform duration-75 flex items-center justify-center ${joystickActive ? 'bg-emerald-500 shadow-emerald-500/50 scale-110' : 'bg-white/10'}`}
+                        style={joystickActive ? {
+                          transform: `translate(${joystickPos.x - joystickBase.x}px, ${joystickPos.y - joystickBase.y}px)`
+                        } : {}}
+                      >
+                        <div className="w-6 h-6 border-2 border-white/20 rounded-full" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Shoot Button */}
+                  <div className="absolute bottom-16 right-16 w-32 h-32 flex items-center justify-center pointer-events-auto">
+                    <button
+                      onTouchStart={(e) => { e.preventDefault(); keysRef.current.add(' '); }}
+                      onTouchEnd={(e) => { e.preventDefault(); keysRef.current.delete(' '); }}
+                      className="w-28 h-28 bg-rose-500/20 backdrop-blur-xl rounded-full border-4 border-rose-500/40 flex items-center justify-center touch-none active:bg-rose-500/60 transition-all active:scale-90 shadow-2xl group"
+                    >
+                      <div className="w-20 h-20 rounded-full border-2 border-rose-500/20 flex items-center justify-center group-active:scale-110 transition-transform">
+                        <Zap className="w-12 h-12 text-rose-500 fill-rose-500/20" />
+                      </div>
+                    </button>
+                  </div>
                   
-                  {/* Hint for direct touch */}
-                  <div className="absolute top-24 left-1/2 -translate-x-1/2 text-white/30 text-xs font-mono uppercase tracking-widest pointer-events-none text-center">
-                    手指点击或拖拽控制坦克移动
+                  {/* Hint */}
+                  <div className="absolute top-24 left-1/2 -translate-x-1/2 text-white/20 text-[10px] font-mono uppercase tracking-[0.3em] pointer-events-none text-center">
+                    左侧摇杆移动 • 右侧按钮射击
                   </div>
                 </div>
               )}
@@ -1631,19 +1709,8 @@ export default function App() {
                     </span>
                   </button>
 
-                  <div className="mt-12 grid grid-cols-3 gap-8 text-zinc-500">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="p-3 bg-white/5 rounded-xl"><Gamepad2 className="w-6 h-6" /></div>
-                      <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '手指触控' : 'WASD 控制'}</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="p-3 bg-white/5 rounded-xl"><Zap className="w-6 h-6" /></div>
-                      <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '自动射击' : '空格 射击'}</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="p-3 bg-white/5 rounded-xl"><Shield className="w-6 h-6" /></div>
-                      <span className="text-xs font-mono uppercase tracking-tighter">{isMobile ? '点击暂停' : 'P 暂停'}</span>
-                    </div>
+                  <div className="mt-12 text-emerald-400 text-2xl font-bold tracking-tight animate-pulse">
+                    在电脑🖥️上玩这个游戏
                   </div>
                 </motion.div>
               )}
